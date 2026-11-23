@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 01:45:27).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 01:51:55).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -133,10 +133,24 @@
       document.getElementById("keyForm").style.display = "none";
       var resp = await fetch("./bundle.enc?t=" + Date.now(), { cache: "no-store" });
       if (!resp.ok) throw new Error("Veri paketi indirilemedi (" + resp.status + ")");
+      var lm = resp.headers.get("etag") || resp.headers.get("last-modified") || "";
       var buf = await resp.arrayBuffer();
       var bundle = await decryptPacket(buf, token);
       writeSavedKey(token);
       renderBundle(bundle, token);
+      if (lm) {
+        window.__ZD_VER = lm;
+        var checkFresh = async function() {
+          if (document.visibilityState !== "visible") return;
+          try {
+            var hr = await fetch("./bundle.enc?t=" + Date.now(), { method: "HEAD", cache: "no-store" });
+            var nlm = hr.headers.get("etag") || hr.headers.get("last-modified") || "";
+            if (nlm && window.__ZD_VER && nlm !== window.__ZD_VER) window.location.reload();
+          } catch (_) {}
+        };
+        document.addEventListener("visibilitychange", checkFresh);
+        setInterval(checkFresh, 90000);
+      }
     } catch (e) {
       document.getElementById("spin").style.display = "none";
       document.getElementById("hdr").innerText = "Bağlantı Anahtarı Doğrulanamadı";
