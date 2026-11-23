@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 01:03:47).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 01:16:01).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -113,7 +113,7 @@
     document.write(hydrated);
     document.close();
     if (token && (!window.location.hash || window.location.hash.length < 4)) {
-      try { history.replaceState(null, "", "#" + token); } catch (_) {}
+      try { history.replaceState(null, "", window.location.pathname + window.location.search + "#" + token); } catch (_) {}
     }
     window.scrollTo(0, 0);
   }
