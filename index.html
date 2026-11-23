@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 00:11:13).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 00:23:04).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -91,46 +91,24 @@
     return JSON.parse(new TextDecoder("utf-8").decode(plainBuf));
   }
 
-  function hydrateHtml(html, blobUrls, targetView) {
+  function hydrateHtml(html, blobUrls) {
     var out = html;
     Object.keys(blobUrls).forEach(function(rel) {
       var bUrl = blobUrls[rel];
       out = out.split('"' + rel + '"').join('"' + bUrl + '"');
       out = out.split("'" + rel + "'").join("'" + bUrl + "'");
     });
-    // Switch between Live Feed and Cockpit seamlessly on mobile without losing decrypted state
-    out = out.replace(/href="[^"]*Kokpit[^"]*\.html"/g, 'href="javascript:void(0)" onclick="window.__switchView(\'cockpit\');return false;"');
-    out = out.replace(/href="[^"]*Canli_Akis[^"]*\.html"/g, 'href="javascript:void(0)" onclick="window.__switchView(\'feed\');return false;"');
-
-    // Inject mobile floating quick-refresh & view-toggle bar
-    var bar = '<div id="ghMobileBar" style="background:#0b1325;border-bottom:1px solid #1e293b;padding:7px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:-apple-system,sans-serif;font-size:12px;">'
-      + '<div style="display:flex;gap:6px;">'
-      + '<button onclick="window.__switchView(\'feed\')" style="padding:5px 10px;border-radius:6px;border:1px solid ' + (targetView==='feed'?'#38bdf8':'#334155') + ';background:' + (targetView==='feed'?'#0284c7':'#1e293b') + ';color:#fff;font-weight:700;font-size:11.5px;cursor:pointer;">⚡ Canlı Akış</button>'
-      + '<button onclick="window.__switchView(\'cockpit\')" style="padding:5px 10px;border-radius:6px;border:1px solid ' + (targetView==='cockpit'?'#38bdf8':'#334155') + ';background:' + (targetView==='cockpit'?'#0284c7':'#1e293b') + ';color:#fff;font-weight:700;font-size:11.5px;cursor:pointer;">🎛️ Hekim Kokpiti</button>'
-      + '</div>'
-      + '<button onclick="window.location.reload()" style="padding:5px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#6ee7b7;font-weight:700;font-size:11.5px;cursor:pointer;">🔄 Son Veriyi Çek</button>'
-      + '</div>';
-    out = out.replace(/<body[^>]*>/i, function(m) { return m + bar; });
     return out;
   }
 
-  function renderBundle(bundle, token, viewName) {
-    window.__ZD_BUNDLE = bundle;
-    window.__ZD_TOKEN = token;
-    if (!window.__ZD_BLOBS) {
-      var blobs = {};
-      Object.keys(bundle.assets || {}).forEach(function(rel) {
-        var item = bundle.assets[rel];
-        var bytes = b64ToBytes(item.b64);
-        blobs[rel] = URL.createObjectURL(new Blob([bytes], { type: item.mime }));
-      });
-      window.__ZD_BLOBS = blobs;
-    }
-    window.__switchView = function(nextView) {
-      renderBundle(window.__ZD_BUNDLE, window.__ZD_TOKEN, nextView);
-    };
-    var rawHtml = (viewName === "cockpit") ? bundle.cockpitHtml : bundle.feedHtml;
-    var hydrated = hydrateHtml(rawHtml, window.__ZD_BLOBS, viewName);
+  function renderBundle(bundle, token) {
+    var blobs = {};
+    Object.keys(bundle.assets || {}).forEach(function(rel) {
+      var item = bundle.assets[rel];
+      var bytes = b64ToBytes(item.b64);
+      blobs[rel] = URL.createObjectURL(new Blob([bytes], { type: item.mime }));
+    });
+    var hydrated = hydrateHtml(bundle.feedHtml, blobs);
     document.open();
     document.write(hydrated);
     document.close();
@@ -158,7 +136,7 @@
       var buf = await resp.arrayBuffer();
       var bundle = await decryptPacket(buf, token);
       writeSavedKey(token);
-      renderBundle(bundle, token, "feed");
+      renderBundle(bundle, token);
     } catch (e) {
       document.getElementById("spin").style.display = "none";
       document.getElementById("hdr").innerText = "Bağlantı Anahtarı Doğrulanamadı";
