@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 08:35:00).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 08:48:30).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -62,7 +62,15 @@
   function extractHashKey() {
     var h = (window.location.hash || "").replace(/^#+/, "").trim();
     if (h.startsWith("k=")) h = h.slice(2);
-    return decodeURIComponent(h);
+    h = decodeURIComponent(h);
+    var dot = h.indexOf(".");
+    if (dot > 0) {
+      var uTok = h.slice(dot + 1);
+      window.__ZD_UTOK = uTok;
+      try { localStorage.setItem("zd_utok", uTok); } catch (_) {}
+      return h.slice(0, dot);
+    }
+    return h;
   }
 
   function b64ToBytes(b64) {
@@ -112,8 +120,8 @@
     document.open();
     document.write(hydrated);
     document.close();
-    if (token && (!window.location.hash || window.location.hash.length < 4)) {
-      try { history.replaceState(null, "", window.location.pathname + window.location.search + "#" + token); } catch (_) {}
+    if (token) {
+      try { history.replaceState(null, "", window.location.pathname + "#" + token); } catch (_) {}
     }
     window.scrollTo(0, 0);
   }
