@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 12:16:58).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 13:07:39).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -189,6 +189,8 @@
       if (!okUser) throw new Error("UNAUTHORIZED_USER_TOKEN");
       window.__ZD_UTOK = uTok;
       window.__ZD_VER = lm;
+      var packetHash = await crypto.subtle.digest("SHA-256", buf);
+      window.__ZD_BUNDLE_HASH = Array.from(new Uint8Array(packetHash)).map(b => b.toString(16).padStart(2, "0")).join("");
       writeSavedPair(token, uTok);
       renderBundle(bundle, token);
     } catch (e) {
