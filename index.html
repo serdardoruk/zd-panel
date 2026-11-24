@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 10:38:14).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 12:02:50).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -188,21 +188,9 @@
       var okUser = await verifyUserToken(bundle.uKeyB64, uTok);
       if (!okUser) throw new Error("UNAUTHORIZED_USER_TOKEN");
       window.__ZD_UTOK = uTok;
+      window.__ZD_VER = lm;
       writeSavedPair(token, uTok);
       renderBundle(bundle, token);
-      if (lm) {
-        window.__ZD_VER = lm;
-        var checkFresh = async function() {
-          if (document.visibilityState !== "visible") return;
-          try {
-            var hr = await fetch("./bundle.enc?t=" + Date.now(), { method: "HEAD", cache: "no-store" });
-            var nlm = hr.headers.get("etag") || hr.headers.get("last-modified") || "";
-            if (nlm && window.__ZD_VER && nlm !== window.__ZD_VER) window.location.reload();
-          } catch (_) {}
-        };
-        document.addEventListener("visibilitychange", checkFresh);
-        setInterval(checkFresh, 90000);
-      }
     } catch (e) {
       try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
       document.getElementById("spin").style.display = "none";
