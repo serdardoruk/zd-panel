@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 08:58:36).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 09:03:00).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -172,8 +172,8 @@
     var uTok = pair && pair.u ? pair.u : "";
     if (!token || !uTok) {
       document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Kişiye Özel Bağlantı Gerekli";
-      document.getElementById("msg").innerText = "Eski genel bağlantı devre dışı bırakılmıştır. Lütfen yalnızca adınıza tanımlanan güncel kişisel bağlantıyı kullanın.";
+      document.getElementById("hdr").innerText = "Bağlantı Yenilendi";
+      document.getElementById("msg").innerText = "Bu bağlantı artık geçerli değildir. Lütfen yeni bağlantıyı isteyin.";
       document.getElementById("keyForm").style.display = "none";
       return;
     }
@@ -206,8 +206,8 @@
     } catch (e) {
       try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
       document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Bağlantı Devre Dışı veya Geçersiz";
-      document.getElementById("msg").innerText = "Eski paylaşım bağlantısı iptal edilmiştir. Lütfen size özel iletilen yeni bağlantıyı açın.";
+      document.getElementById("hdr").innerText = "Bağlantı Yenilendi";
+      document.getElementById("msg").innerText = "Bu bağlantı artık geçerli değildir. Lütfen yeni bağlantıyı isteyin.";
       document.getElementById("keyForm").style.display = "none";
     }
   }
