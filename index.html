@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 08:48:38).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (24.11.2026 08:58:36).</p>
   <div id="keyForm" style="display:none;">
     <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
     <button onclick="manualUnlock()">Paneli Aç</button>
@@ -53,24 +53,36 @@
 
 <script>
 (function() {
-  function readSavedKey() {
-    try { return localStorage.getItem("zd_panel_k") || ""; } catch (_) { return ""; }
+  // Purge legacy v1 generic-link localStorage keys
+  try {
+    localStorage.removeItem("zd_panel_k");
+    localStorage.removeItem("zd_utok");
+    localStorage.removeItem("zd_ktag");
+  } catch (_) {}
+
+  function readSavedPair() {
+    try {
+      return {
+        k: localStorage.getItem("zd_panel_k2") || "",
+        u: localStorage.getItem("zd_utok_v2") || ""
+      };
+    } catch (_) { return { k: "", u: "" }; }
   }
-  function writeSavedKey(k) {
-    try { localStorage.setItem("zd_panel_k", k); } catch (_) {}
+  function writeSavedPair(k, u) {
+    try {
+      localStorage.setItem("zd_panel_k2", k);
+      localStorage.setItem("zd_utok_v2", u);
+    } catch (_) {}
   }
-  function extractHashKey() {
-    var h = (window.location.hash || "").replace(/^#+/, "").trim();
-    if (h.startsWith("k=")) h = h.slice(2);
+  function parseInputRef(raw) {
+    var h = String(raw || "").replace(/^#+/, "").trim();
+    if (h.includes("#")) h = h.split("#").pop().trim();
     h = decodeURIComponent(h);
     var dot = h.indexOf(".");
     if (dot > 0) {
-      var uTok = h.slice(dot + 1);
-      window.__ZD_UTOK = uTok;
-      try { localStorage.setItem("zd_utok", uTok); } catch (_) {}
-      return h.slice(0, dot);
+      return { k: h.slice(0, dot), u: h.slice(dot + 1) };
     }
-    return h;
+    return { k: h, u: "" };
   }
 
   function b64ToBytes(b64) {
@@ -78,6 +90,33 @@
     var arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     return arr;
+  }
+  function b64UrlToBytes(s) {
+    var b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return b64ToBytes(b64);
+  }
+  function concatBytes(arrays) {
+    var total = 0;
+    arrays.forEach(function(a) { total += a.length; });
+    var out = new Uint8Array(total);
+    var off = 0;
+    arrays.forEach(function(a) { out.set(a, off); off += a.length; });
+    return out;
+  }
+
+  async function verifyUserToken(uKeyB64, uTok) {
+    if (!uKeyB64 || !uTok || uTok.length < 10) return false;
+    try {
+      var raw = b64UrlToBytes(uTok);
+      if (raw.length < 8 || raw.length > 38) return false;
+      var nonce = raw.slice(0, 4);
+      var ct = raw.slice(4, raw.length - 3);
+      var mac = raw.slice(raw.length - 3);
+      var kb = b64ToBytes(uKeyB64);
+      var exp = new Uint8Array(await crypto.subtle.digest("SHA-256", concatBytes([kb, new Uint8Array([2]), nonce, ct])));
+      return mac[0] === exp[0] && mac[1] === exp[1] && mac[2] === exp[2];
+    } catch (_) { return false; }
   }
 
   async function decryptPacket(buf, token) {
@@ -126,14 +165,16 @@
     window.scrollTo(0, 0);
   }
 
-  async function boot(token) {
+  async function boot(pair) {
     var errEl = document.getElementById("errBox");
     errEl.style.display = "none";
-    if (!token) {
+    var token = pair && pair.k ? pair.k : "";
+    var uTok = pair && pair.u ? pair.u : "";
+    if (!token || !uTok) {
       document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Erişim Anahtarı Gerekli";
-      document.getElementById("msg").innerText = "Lütfen WhatsApp'tan paylaşılan tam bağlantıyı kullanın veya erişim kodunu girin.";
-      document.getElementById("keyForm").style.display = "block";
+      document.getElementById("hdr").innerText = "Kişiye Özel Bağlantı Gerekli";
+      document.getElementById("msg").innerText = "Eski genel bağlantı devre dışı bırakılmıştır. Lütfen yalnızca adınıza tanımlanan güncel kişisel bağlantıyı kullanın.";
+      document.getElementById("keyForm").style.display = "none";
       return;
     }
     try {
@@ -144,7 +185,10 @@
       var lm = resp.headers.get("etag") || resp.headers.get("last-modified") || "";
       var buf = await resp.arrayBuffer();
       var bundle = await decryptPacket(buf, token);
-      writeSavedKey(token);
+      var okUser = await verifyUserToken(bundle.uKeyB64, uTok);
+      if (!okUser) throw new Error("UNAUTHORIZED_USER_TOKEN");
+      window.__ZD_UTOK = uTok;
+      writeSavedPair(token, uTok);
       renderBundle(bundle, token);
       if (lm) {
         window.__ZD_VER = lm;
@@ -160,23 +204,23 @@
         setInterval(checkFresh, 90000);
       }
     } catch (e) {
+      try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
       document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Bağlantı Anahtarı Doğrulanamadı";
-      document.getElementById("msg").innerText = "Bağlantının sonundaki #kod kısmının tam kopyalandığından emin olun.";
-      document.getElementById("keyForm").style.display = "block";
-      errEl.innerText = "Şifre çözme hatası veya eksik anahtar.";
-      errEl.style.display = "block";
+      document.getElementById("hdr").innerText = "Bağlantı Devre Dışı veya Geçersiz";
+      document.getElementById("msg").innerText = "Eski paylaşım bağlantısı iptal edilmiştir. Lütfen size özel iletilen yeni bağlantıyı açın.";
+      document.getElementById("keyForm").style.display = "none";
     }
   }
 
   window.manualUnlock = function() {
     var v = document.getElementById("keyInput").value.trim();
-    if (v.includes("#")) v = v.split("#").pop();
-    boot(v);
+    boot(parseInputRef(v));
   };
 
-  var initialKey = extractHashKey() || readSavedKey();
-  boot(initialKey);
+  var fromHash = parseInputRef(window.location.hash);
+  var saved = readSavedPair();
+  var activePair = (fromHash.k && fromHash.u) ? fromHash : saved;
+  boot(activePair);
 })();
 </script>
 </body>
