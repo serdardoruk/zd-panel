@@ -43,10 +43,10 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 13:50:43).</p>
-  <div id="keyForm" style="display:none;">
-    <input type="password" id="keyInput" placeholder="Erişim anahtarını girin" autocomplete="off">
-    <button onclick="manualUnlock()">Paneli Aç</button>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 14:02:02).</p>
+  <div id="pinForm" style="display:none;">
+    <input type="password" id="pin6Input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6 haneli şifre" autocomplete="one-time-code" style="letter-spacing:6px;font-size:20px;font-weight:700;" oninput="onPin6Input()" onkeydown="if(event.key==='Enter')submitPin6()">
+    <button onclick="submitPin6()">Raporu Aç</button>
   </div>
   <div class="err" id="errBox"></div>
 </div>
@@ -59,6 +59,10 @@
     localStorage.removeItem("zd_utok");
     localStorage.removeItem("zd_ktag");
   } catch (_) {}
+
+  var cachedBuf = null;
+  var cachedEtag = "";
+  var currentPair = { k: "", u: "" };
 
   function readSavedPair() {
     try {
@@ -73,6 +77,12 @@
       localStorage.setItem("zd_panel_k2", k);
       localStorage.setItem("zd_utok_v2", u);
     } catch (_) {}
+  }
+  function readSavedSitePin() {
+    try { return (localStorage.getItem("zd_site_pin6") || "").trim(); } catch (_) { return ""; }
+  }
+  function writeSavedSitePin(p) {
+    try { localStorage.setItem("zd_site_pin6", p); } catch (_) {}
   }
   function parseInputRef(raw) {
     var h = String(raw || "").replace(/^#+/, "").trim();
@@ -148,7 +158,7 @@
     return out;
   }
 
-  function renderBundle(bundle, token) {
+  function renderBundle(bundle, token, uTok) {
     var blobs = {};
     Object.keys(bundle.assets || {}).forEach(function(rel) {
       var item = bundle.assets[rel];
@@ -159,52 +169,120 @@
     document.open();
     document.write(hydrated);
     document.close();
-    if (token) {
+    if (token && uTok) {
+      try { history.replaceState(null, "", window.location.pathname + "#" + token + "." + uTok); } catch (_) {}
+    } else if (token) {
       try { history.replaceState(null, "", window.location.pathname + "#" + token); } catch (_) {}
     }
     window.scrollTo(0, 0);
   }
 
-  async function boot(pair) {
+  function showPinPrompt(errMsg) {
+    document.getElementById("spin").style.display = "none";
+    document.getElementById("hdr").innerText = "🔒 Erişim Şifresi";
+    document.getElementById("msg").innerText = "Klinik takip panelini görüntülemek için 6 haneli şifreyi girin.";
+    document.getElementById("pinForm").style.display = "block";
     var errEl = document.getElementById("errBox");
-    errEl.style.display = "none";
-    var token = pair && pair.k ? pair.k : "";
-    var uTok = pair && pair.u ? pair.u : "";
-    if (!token || !uTok) {
-      document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Bağlantı Yenilendi";
-      document.getElementById("msg").innerText = "Bu bağlantı artık geçerli değildir. Lütfen yeni bağlantıyı isteyin.";
-      document.getElementById("keyForm").style.display = "none";
-      return;
+    if (errMsg) {
+      errEl.innerText = errMsg;
+      errEl.style.display = "block";
+    } else {
+      errEl.style.display = "none";
     }
-    try {
-      document.getElementById("spin").style.display = "block";
-      document.getElementById("keyForm").style.display = "none";
-      var resp = await fetch("./bundle.enc?t=" + Date.now(), { cache: "no-store" });
-      if (!resp.ok) throw new Error("Veri paketi indirilemedi (" + resp.status + ")");
-      var lm = resp.headers.get("etag") || resp.headers.get("last-modified") || "";
-      var buf = await resp.arrayBuffer();
-      var bundle = await decryptPacket(buf, token);
-      var okUser = await verifyUserToken(bundle.uKeyB64, uTok);
-      if (!okUser) throw new Error("UNAUTHORIZED_USER_TOKEN");
-      window.__ZD_UTOK = uTok;
-      window.__ZD_VER = lm;
-      var packetHash = await crypto.subtle.digest("SHA-256", buf);
-      window.__ZD_BUNDLE_HASH = Array.from(new Uint8Array(packetHash)).map(b => b.toString(16).padStart(2, "0")).join("");
-      writeSavedPair(token, uTok);
-      renderBundle(bundle, token);
-    } catch (e) {
-      try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
-      document.getElementById("spin").style.display = "none";
-      document.getElementById("hdr").innerText = "Bağlantı Yenilendi";
-      document.getElementById("msg").innerText = "Bu bağlantı artık geçerli değildir. Lütfen yeni bağlantıyı isteyin.";
-      document.getElementById("keyForm").style.display = "none";
+    var inp = document.getElementById("pin6Input");
+    if (inp) {
+      inp.value = "";
+      setTimeout(function() { inp.focus(); }, 60);
     }
   }
 
-  window.manualUnlock = function() {
-    var v = document.getElementById("keyInput").value.trim();
-    boot(parseInputRef(v));
+  async function ensureEncryptedBuffer() {
+    if (cachedBuf) return cachedBuf;
+    var resp = await fetch("./bundle.enc?t=" + Date.now(), { cache: "no-store" });
+    if (!resp.ok) throw new Error("NETWORK_ERR");
+    cachedEtag = resp.headers.get("etag") || resp.headers.get("last-modified") || "";
+    cachedBuf = await resp.arrayBuffer();
+    return cachedBuf;
+  }
+
+  async function tryUnlockWithPin(pin6, showErrOnFail) {
+    var token = currentPair.k;
+    var uTok = currentPair.u;
+    try {
+      document.getElementById("errBox").style.display = "none";
+      document.getElementById("spin").style.display = "block";
+      var buf = await ensureEncryptedBuffer();
+      var bundle = await decryptPacket(buf, token + ":" + pin6);
+      var okUser = await verifyUserToken(bundle.uKeyB64, uTok);
+      if (!okUser) {
+        try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
+        document.getElementById("spin").style.display = "none";
+        document.getElementById("pinForm").style.display = "none";
+        document.getElementById("hdr").innerText = "Bağlantı Geçersiz";
+        document.getElementById("msg").innerText = "Bu bağlantı geçerli değildir. Lütfen yetkili bağlantınızı kullanın.";
+        return;
+      }
+      writeSavedPair(token, uTok);
+      writeSavedSitePin(pin6);
+      window.__ZD_UTOK = uTok;
+      window.__ZD_VER = cachedEtag;
+      var packetHash = await crypto.subtle.digest("SHA-256", buf);
+      window.__ZD_BUNDLE_HASH = Array.from(new Uint8Array(packetHash)).map(b => b.toString(16).padStart(2, "0")).join("");
+      renderBundle(bundle, token, uTok);
+    } catch (e) {
+      if (e && e.message === "NETWORK_ERR") {
+        showPinPrompt("Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.");
+        return;
+      }
+      try { localStorage.removeItem("zd_site_pin6"); } catch (_) {}
+      showPinPrompt(showErrOnFail ? "Hatalı 6 haneli şifre. Lütfen tekrar deneyin." : "");
+    }
+  }
+
+  async function boot(pair) {
+    var token = pair && pair.k ? pair.k : "";
+    var uTok = pair && pair.u ? pair.u : "";
+    if (!token || !uTok || token.length < 16 || uTok.length < 10) {
+      document.getElementById("spin").style.display = "none";
+      document.getElementById("pinForm").style.display = "none";
+      document.getElementById("hdr").innerText = "Erişim Kısıtlı";
+      document.getElementById("msg").innerText = "Bu sayfayı görüntülemek için kişiye özel yetkili bağlantınızı kullanın.";
+      return;
+    }
+    currentPair = { k: token, u: uTok };
+    writeSavedPair(token, uTok);
+    try {
+      await ensureEncryptedBuffer();
+    } catch (_) {
+      showPinPrompt("Veri paketi indirilemedi. Lütfen sayfayı yenileyin.");
+      return;
+    }
+    var savedPin = readSavedSitePin();
+    if (/^d{6}$/.test(savedPin)) {
+      await tryUnlockWithPin(savedPin, false);
+    } else {
+      showPinPrompt("");
+    }
+  }
+
+  window.onPin6Input = function() {
+    var inp = document.getElementById("pin6Input");
+    if (!inp) return;
+    var clean = inp.value.replace(/D+/g, "").slice(0, 6);
+    if (inp.value !== clean) inp.value = clean;
+    if (clean.length === 6) {
+      tryUnlockWithPin(clean, true);
+    }
+  };
+
+  window.submitPin6 = function() {
+    var inp = document.getElementById("pin6Input");
+    var clean = (inp ? inp.value : "").replace(/D+/g, "");
+    if (clean.length !== 6) {
+      showPinPrompt("Lütfen 6 haneli sayısal şifreyi eksiksiz girin.");
+      return;
+    }
+    tryUnlockWithPin(clean, true);
   };
 
   var fromHash = parseInputRef(window.location.hash);
