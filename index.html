@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 20:22:43).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 20:23:20).</p>
   <div id="pinForm" style="display:none;">
     <input type="password" id="pin6Input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6 haneli şifre" autocomplete="one-time-code" style="letter-spacing:6px;font-size:20px;font-weight:700;" oninput="onPin6Input()" onkeydown="if(event.key==='Enter')submitPin6()">
     <button onclick="submitPin6()">Raporu Aç</button>
@@ -63,6 +63,115 @@
   var cachedBuf = null;
   var cachedEtag = "";
   var currentPair = { k: "", u: "" };
+  var GATE_TOPIC = "zdg_312a8bace26f4153d77ee33a";
+  var GATE_SPKI_B64 = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApuI3y+eDFXRLISzLF8o6vcfxHjluv8V8PNyADK6lp1Q5XGVFrczo/w0EagxZVQMOilJx51Qc/cjiwtYG7N7bBr1pA0Wdbm9CQkwv4W5kxRmiLIYfzQ9rbZqcvr3AbZPTif6O4OB+/3F7uQXvq+l1ZMQGuDX6ENk4EYI1yrza4claj1aLZw24zmyLXjZ0JYCCVXdYMue2qmZ1Xfg3t3n1hGbk7Ly/AUQjmbzYX5vBBwpLqx5YMPEQy9h8Xou2Nm8DeDqMlO16XEyY/X/ZWdOcg+k0jEVSsGTFMauZn9u0g4CKW4N944qnbour9QCPHji7J1y4UtAkzcRtQvBGz7CJyQIDAQAB";
+  var cachedGatePubKey = null;
+  var gateStartMs = Date.now();
+  var pinFailCount = 0;
+  var gateReportedShown = false;
+  var gateUnlocked = false;
+
+  function randHex(len) {
+    try {
+      var a = crypto.getRandomValues(new Uint8Array(len));
+      return Array.from(a).map(function(b) { return b.toString(16).padStart(2, "0"); }).join("").slice(0, len);
+    } catch (_) { return "gate0001"; }
+  }
+  function u8ToB64(u8) {
+    var s = "";
+    for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s);
+  }
+  function readGateDid() {
+    try {
+      var d = localStorage.getItem("zd_did");
+      if (!d) { d = randHex(6); localStorage.setItem("zd_did", d); }
+      return d;
+    } catch (_) { return "anon"; }
+  }
+  var gateSid = randHex(8);
+  var gateDid = readGateDid();
+  window.__ZD_GATE_SID = gateSid;
+
+  function detectGateDev() {
+    var ua = navigator.userAgent || "";
+    var app = /WhatsApp/i.test(ua) ? "WhatsApp" : (/Instagram|FBAN/i.test(ua) ? "Sosyal" : (/CriOS|Chrome/i.test(ua) ? "Chrome" : (/Safari/i.test(ua) ? "Safari" : "Tarayıcı")));
+    var osName = /iPhone/i.test(ua) ? "iPhone" : (/iPad/i.test(ua) ? "iPad" : (/Android/i.test(ua) ? "Android" : (/Macintosh|Mac OS/i.test(ua) ? "Mac" : (/Windows/i.test(ua) ? "Windows" : "Cihaz"))));
+    return osName + " (" + app + ")";
+  }
+  async function resolveGateGeo() {
+    try {
+      var cached = sessionStorage.getItem("zd_geo_v2");
+      if (cached) return JSON.parse(cached);
+      var ctrl = new AbortController();
+      var t = setTimeout(function() { ctrl.abort(); }, 1800);
+      var r = await fetch("https://get.geojs.io/v1/ip/geo.json", { signal: ctrl.signal });
+      clearTimeout(t);
+      if (r.ok) {
+        var j = await r.json();
+        var c = j.city || "";
+        var reg = (j.region && j.region !== c) ? ("/" + j.region) : "";
+        var cc = (j.country_code && j.country_code !== "TR") ? (" " + j.country_code) : "";
+        var locStr = (c + reg + cc).trim() || "TR";
+        var org = j.organization_name || "";
+        var isp = /Turkcell/i.test(org) ? "Turkcell" : (/Superonline/i.test(org) ? "Superonline" : (/Telekom|TTNet/i.test(org) ? "Türk Telekom" : (/Vodafone/i.test(org) ? "Vodafone" : org.replace(/ASd+s*/i, "").split(/s+/).slice(0, 2).join(" ").slice(0, 18))));
+        var info = { city: locStr, isp: isp, net: "" };
+        sessionStorage.setItem("zd_geo_v2", JSON.stringify(info));
+        return info;
+      }
+    } catch (_) {}
+    return { city: "-", isp: "", net: "" };
+  }
+  async function sendGateEvent(evType, mode, useBeacon) {
+    if (!GATE_TOPIC || !GATE_SPKI_B64 || !window.crypto || !crypto.subtle) return;
+    try {
+      var isOwn = false;
+      try { isOwn = localStorage.getItem("zd_owner") === "1"; } catch (_) {}
+      var geoRaw = null;
+      try { geoRaw = sessionStorage.getItem("zd_geo_v2"); } catch (_) {}
+      var geo = geoRaw ? JSON.parse(geoRaw) : (!useBeacon ? await resolveGateGeo() : { city: "-", isp: "", net: "" });
+      var payload = {
+        sid: gateSid,
+        did: gateDid,
+        ev: evType,
+        mode: mode,
+        ts: Math.floor(Date.now() / 1000),
+        dur: Math.max(1, Math.round((Date.now() - gateStartMs) / 1000)),
+        dev: detectGateDev(),
+        scr: (window.screen && window.screen.width) ? (window.screen.width + "×" + window.screen.height) : "",
+        city: geo.city || "-",
+        isp: geo.isp || "",
+        net: geo.net || "",
+        uTok: currentPair.u || "",
+        hasLink: !!(currentPair.k && currentPair.u),
+        fails: pinFailCount,
+        own: isOwn ? 1 : 0
+      };
+      if (!cachedGatePubKey) {
+        cachedGatePubKey = await crypto.subtle.importKey(
+          "spki", b64ToBytes(GATE_SPKI_B64), { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]
+        );
+      }
+      var aesRaw = crypto.getRandomValues(new Uint8Array(32));
+      var aesKey = await crypto.subtle.importKey("raw", aesRaw, "AES-GCM", false, ["encrypt"]);
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var pt = new TextEncoder().encode(JSON.stringify(payload));
+      var ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, aesKey, pt));
+      var wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, cachedGatePubKey, aesRaw));
+      var msg = "v2." + u8ToB64(wrapped) + "." + u8ToB64(iv) + "." + u8ToB64(ct);
+      var url = "https://ntfy.sh/" + GATE_TOPIC;
+      if (useBeacon && navigator.sendBeacon) {
+        navigator.sendBeacon(url, msg);
+      } else {
+        fetch(url, { method: "POST", body: msg, keepalive: true }).catch(function() {});
+      }
+    } catch (_) {}
+  }
+  window.addEventListener("pagehide", function() {
+    if (!gateUnlocked && gateReportedShown) {
+      sendGateEvent("leave", pinFailCount > 0 ? "pin_fail" : "pin_abandoned", true);
+    }
+  });
 
   function readSavedPair() {
     var k = "", u = "";
@@ -200,6 +309,10 @@
   }
 
   function showPinPrompt(errMsg) {
+    if (!gateReportedShown && !errMsg) {
+      gateReportedShown = true;
+      sendGateEvent("gate", "pin_gate", false);
+    }
     document.getElementById("spin").style.display = "none";
     document.getElementById("hdr").innerText = "🔒 Erişim Şifresi";
     document.getElementById("msg").innerText = "Klinik takip panelini görüntülemek için 6 haneli şifreyi girin.";
@@ -237,6 +350,7 @@
       var bundle = await decryptPacket(buf, token + ":" + pin6);
       var okUser = await verifyUserToken(bundle.uKeyB64, uTok);
       if (!okUser) {
+        sendGateEvent("bad_link", "blocked_nolink", false);
         try { localStorage.removeItem("zd_panel_k2"); localStorage.removeItem("zd_utok_v2"); } catch (_) {}
         document.getElementById("spin").style.display = "none";
         document.getElementById("pinForm").style.display = "none";
@@ -244,9 +358,12 @@
         document.getElementById("msg").innerText = "Bu bağlantı geçerli değildir. Lütfen yetkili bağlantınızı kullanın.";
         return;
       }
+      gateUnlocked = true;
       writeSavedPair(token, uTok);
       writeSavedSitePin(pin6);
       window.__ZD_UTOK = uTok;
+      window.__ZD_GATE_SID = gateSid;
+      window.__ZD_GATE_FAILS = pinFailCount;
       window.__ZD_VER = cachedEtag;
       var packetHash = await crypto.subtle.digest("SHA-256", buf);
       window.__ZD_BUNDLE_HASH = Array.from(new Uint8Array(packetHash)).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -258,6 +375,8 @@
         return;
       }
       if (showErrOnFail) {
+        pinFailCount++;
+        sendGateEvent("gate_fail", "pin_fail", false);
         try { localStorage.removeItem("zd_site_pin6"); } catch (_) {}
       }
       showPinPrompt(showErrOnFail ? "Hatalı 6 haneli şifre. Lütfen tekrar deneyin." : "");
@@ -268,6 +387,7 @@
     var token = pair && pair.k ? pair.k : "";
     var uTok = pair && pair.u ? pair.u : "";
     if (!token || !uTok || token.length < 16 || uTok.length < 10) {
+      sendGateEvent("no_link", "blocked_nolink", false);
       document.getElementById("spin").style.display = "none";
       document.getElementById("pinForm").style.display = "none";
       document.getElementById("hdr").innerText = "Erişim Kısıtlı";
