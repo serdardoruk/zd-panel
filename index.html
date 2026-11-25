@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 14:18:25).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 14:24:51).</p>
   <div id="pinForm" style="display:none;">
     <input type="password" id="pin6Input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6 haneli şifre" autocomplete="one-time-code" style="letter-spacing:6px;font-size:20px;font-weight:700;" oninput="onPin6Input()" onkeydown="if(event.key==='Enter')submitPin6()">
     <button onclick="submitPin6()">Raporu Aç</button>
@@ -72,8 +72,8 @@
     } catch (_) {}
     if (!k || !u) {
       try {
-        var mk = document.cookie.match(/(?:^|;s*)zd_k2=([^;]+)/);
-        var mu = document.cookie.match(/(?:^|;s*)zd_u2=([^;]+)/);
+        var mk = document.cookie.match(/(?:^|; *)zd_k2=([^;]+)/);
+        var mu = document.cookie.match(/(?:^|; *)zd_u2=([^;]+)/);
         if (mk && !k) k = decodeURIComponent(mk[1]);
         if (mu && !u) u = decodeURIComponent(mu[1]);
       } catch (_) {}
@@ -93,9 +93,9 @@
   function readSavedSitePin() {
     var p = "";
     try { p = (localStorage.getItem("zd_site_pin6") || "").trim(); } catch (_) {}
-    if (/^d{6}$/.test(p)) return p;
+    if (/^[0-9]{6}$/.test(p)) return p;
     try {
-      var m = document.cookie.match(/(?:^|;s*)zd_site_pin6=(d{6})(?:;|$)/);
+      var m = document.cookie.match(/(?:^|; *)zd_site_pin6=([0-9]{6})(?:;|$)/);
       if (m) return m[1];
     } catch (_) {}
     return "";
@@ -283,7 +283,7 @@
       return;
     }
     var savedPin = readSavedSitePin();
-    if (/^d{6}$/.test(savedPin)) {
+    if (/^[0-9]{6}$/.test(savedPin)) {
       await tryUnlockWithPin(savedPin, false);
     } else {
       showPinPrompt("");
@@ -293,7 +293,7 @@
   window.onPin6Input = function() {
     var inp = document.getElementById("pin6Input");
     if (!inp) return;
-    var clean = inp.value.replace(/D+/g, "").slice(0, 6);
+    var clean = inp.value.replace(/[^0-9]+/g, "").slice(0, 6);
     if (inp.value !== clean) inp.value = clean;
     if (clean.length === 6) {
       tryUnlockWithPin(clean, true);
@@ -302,7 +302,7 @@
 
   window.submitPin6 = function() {
     var inp = document.getElementById("pin6Input");
-    var clean = (inp ? inp.value : "").replace(/D+/g, "");
+    var clean = (inp ? inp.value : "").replace(/[^0-9]+/g, "");
     if (clean.length !== 6) {
       showPinPrompt("Lütfen 6 haneli sayısal şifreyi eksiksiz girin.");
       return;
