@@ -43,7 +43,7 @@
 <div class="box" id="loaderBox">
   <div class="spinner" id="spin"></div>
   <h2 id="hdr">Güncel Rapor Açılıyor...</h2>
-  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 14:02:58).</p>
+  <p id="msg">Şifreli klinik veri paketi doğrulanıyor (25.11.2026 14:06:08).</p>
   <div id="pinForm" style="display:none;">
     <input type="password" id="pin6Input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6 haneli şifre" autocomplete="one-time-code" style="letter-spacing:6px;font-size:20px;font-weight:700;" oninput="onPin6Input()" onkeydown="if(event.key==='Enter')submitPin6()">
     <button onclick="submitPin6()">Raporu Aç</button>
@@ -65,24 +65,46 @@
   var currentPair = { k: "", u: "" };
 
   function readSavedPair() {
+    var k = "", u = "";
     try {
-      return {
-        k: localStorage.getItem("zd_panel_k2") || "",
-        u: localStorage.getItem("zd_utok_v2") || ""
-      };
-    } catch (_) { return { k: "", u: "" }; }
+      k = localStorage.getItem("zd_panel_k2") || "";
+      u = localStorage.getItem("zd_utok_v2") || "";
+    } catch (_) {}
+    if (!k || !u) {
+      try {
+        var mk = document.cookie.match(/(?:^|;s*)zd_k2=([^;]+)/);
+        var mu = document.cookie.match(/(?:^|;s*)zd_u2=([^;]+)/);
+        if (mk && !k) k = decodeURIComponent(mk[1]);
+        if (mu && !u) u = decodeURIComponent(mu[1]);
+      } catch (_) {}
+    }
+    return { k: k, u: u };
   }
   function writeSavedPair(k, u) {
     try {
       localStorage.setItem("zd_panel_k2", k);
       localStorage.setItem("zd_utok_v2", u);
     } catch (_) {}
+    try {
+      document.cookie = "zd_k2=" + encodeURIComponent(k) + "; max-age=31536000; path=/; SameSite=Strict; Secure";
+      document.cookie = "zd_u2=" + encodeURIComponent(u) + "; max-age=31536000; path=/; SameSite=Strict; Secure";
+    } catch (_) {}
   }
   function readSavedSitePin() {
-    try { return (localStorage.getItem("zd_site_pin6") || "").trim(); } catch (_) { return ""; }
+    var p = "";
+    try { p = (localStorage.getItem("zd_site_pin6") || "").trim(); } catch (_) {}
+    if (/^d{6}$/.test(p)) return p;
+    try {
+      var m = document.cookie.match(/(?:^|;s*)zd_site_pin6=(d{6})(?:;|$)/);
+      if (m) return m[1];
+    } catch (_) {}
+    return "";
   }
   function writeSavedSitePin(p) {
     try { localStorage.setItem("zd_site_pin6", p); } catch (_) {}
+    try {
+      document.cookie = "zd_site_pin6=" + p + "; max-age=31536000; path=/; SameSite=Strict; Secure";
+    } catch (_) {}
   }
   function parseInputRef(raw) {
     var h = String(raw || "").replace(/^#+/, "").trim();
@@ -230,11 +252,14 @@
       window.__ZD_BUNDLE_HASH = Array.from(new Uint8Array(packetHash)).map(b => b.toString(16).padStart(2, "0")).join("");
       renderBundle(bundle, token, uTok);
     } catch (e) {
-      if (e && e.message === "NETWORK_ERR") {
-        showPinPrompt("Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.");
+      if (!cachedBuf || cachedBuf.byteLength < 4096 || (e && e.message === "NETWORK_ERR")) {
+        cachedBuf = null;
+        showPinPrompt("Bağlantı zayıf; lütfen sayfayı yenileyin.");
         return;
       }
-      try { localStorage.removeItem("zd_site_pin6"); } catch (_) {}
+      if (showErrOnFail) {
+        try { localStorage.removeItem("zd_site_pin6"); } catch (_) {}
+      }
       showPinPrompt(showErrOnFail ? "Hatalı 6 haneli şifre. Lütfen tekrar deneyin." : "");
     }
   }
